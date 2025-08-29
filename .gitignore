@@ -14,4 +14,18 @@ wheels/
 .venv
 .envrc
 
-.idea/**
+# IDE (Eclipse / IntelliJ / SublimeText / Visual Studio Code / ...)
+.classpath
+.directory
+.factorypath
+.idea
+.metadata
+.metals
+.project
+.settings
+.sts4-cache
+.vscode
+*.iml
+*.ipr
+*.sublime-project
+*.sublime-workspace
