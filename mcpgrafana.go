@@ -15,10 +15,13 @@ import (
 	"sync"
 
 	"github.com/go-openapi/strfmt"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/grafana/grafana-openapi-client-go/client"
 	"github.com/grafana/incident-go"
 	"github.com/mark3labs/mcp-go/server"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	jwtutil "github.com/grafana/mcp-grafana/jwt"
 )
 
 const (
@@ -598,6 +601,94 @@ func ComposedHTTPContextFunc(config GrafanaConfig) server.HTTPContextFunc {
 		func(ctx context.Context, req *http.Request) context.Context {
 			return WithGrafanaConfig(ctx, config)
 		},
+		ExtractGrafanaInfoFromHeaders,
+		ExtractGrafanaClientFromHeaders,
+		ExtractIncidentClientFromHeaders,
+	)
+}
+
+type jwtKey struct{}
+type jwtErrorKey struct{}
+
+// WithJWT adds a validated JWT token to the context.
+func WithJWT(ctx context.Context, token *jwt.Token) context.Context {
+	return context.WithValue(ctx, jwtKey{}, token)
+}
+
+// JWTFromContext retrieves the validated JWT token from the context.
+// Returns nil if no token has been set or JWT validation is disabled.
+func JWTFromContext(ctx context.Context) *jwt.Token {
+	if token, ok := ctx.Value(jwtKey{}).(*jwt.Token); ok {
+		return token
+	}
+	return nil
+}
+
+// WithJWTError adds a JWT validation error to the context.
+func WithJWTError(ctx context.Context, err error) context.Context {
+	return context.WithValue(ctx, jwtErrorKey{}, err)
+}
+
+// JWTErrorFromContext retrieves the JWT validation error from the context.
+// Returns nil if no error has been set.
+func JWTErrorFromContext(ctx context.Context) error {
+	if err, ok := ctx.Value(jwtErrorKey{}).(error); ok {
+		return err
+	}
+	return nil
+}
+
+// ValidateJWTFromHeaders is a HTTPContextFunc that validates JWT tokens from HTTP request headers.
+// It extracts and validates the JWT token according to the provided JWT configuration.
+var ValidateJWTFromHeaders = func(jwtConfig jwtutil.Config) httpContextFunc {
+	return func(ctx context.Context, req *http.Request) context.Context {
+		validator, err := jwtutil.NewValidator(jwtConfig)
+		if err != nil {
+			slog.Error("Failed to create JWT validator", "error", err)
+			// For now, we continue without JWT validation if setup fails
+			// In production, you might want to return an error response instead
+			return ctx
+		}
+
+		if validator != nil {
+			token, err := validator.ValidateRequest(req)
+			if err != nil {
+				slog.Warn("JWT validation failed", "error", err)
+				// Store validation error in context so handlers can decide how to respond
+				return WithJWTError(ctx, err)
+			}
+			if token != nil {
+				slog.Debug("JWT validation successful")
+				return WithJWT(ctx, token)
+			}
+		}
+
+		return ctx
+	}
+}
+
+// ComposedSSEContextFuncWithJWT returns a SSEContextFunc that includes JWT validation.
+// It sets up the complete context for SSE transport with JWT authentication.
+func ComposedSSEContextFuncWithJWT(config GrafanaConfig, jwtConfig jwtutil.Config) server.SSEContextFunc {
+	return ComposeSSEContextFuncs(
+		func(ctx context.Context, req *http.Request) context.Context {
+			return WithGrafanaConfig(ctx, config)
+		},
+		ValidateJWTFromHeaders(jwtConfig),
+		ExtractGrafanaInfoFromHeaders,
+		ExtractGrafanaClientFromHeaders,
+		ExtractIncidentClientFromHeaders,
+	)
+}
+
+// ComposedHTTPContextFuncWithJWT returns a HTTPContextFunc that includes JWT validation.
+// It provides the complete context setup for HTTP transport with JWT authentication.
+func ComposedHTTPContextFuncWithJWT(config GrafanaConfig, jwtConfig jwtutil.Config) server.HTTPContextFunc {
+	return ComposeHTTPContextFuncs(
+		func(ctx context.Context, req *http.Request) context.Context {
+			return WithGrafanaConfig(ctx, config)
+		},
+		ValidateJWTFromHeaders(jwtConfig),
 		ExtractGrafanaInfoFromHeaders,
 		ExtractGrafanaClientFromHeaders,
 		ExtractIncidentClientFromHeaders,
