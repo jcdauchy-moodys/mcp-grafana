@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v5"
+	gojwt "github.com/golang-jwt/jwt/v5"
 )
 
 // Config holds JWT validation configuration
@@ -73,7 +73,7 @@ func NewValidator(config Config) (*Validator, error) {
 }
 
 // ValidateRequest validates the JWT token from the HTTP request
-func (v *Validator) ValidateRequest(req *http.Request) (*jwt.Token, error) {
+func (v *Validator) ValidateRequest(req *http.Request) (*gojwt.Token, error) {
 	if v == nil {
 		// JWT validation is disabled
 		return nil, nil
@@ -86,9 +86,9 @@ func (v *Validator) ValidateRequest(req *http.Request) (*jwt.Token, error) {
 	}
 
 	// Parse and validate the token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := gojwt.Parse(tokenString, func(token *gojwt.Token) (interface{}, error) {
 		// Verify the signing method is RSA256
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+		if _, ok := token.Method.(*gojwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return v.publicKey, nil

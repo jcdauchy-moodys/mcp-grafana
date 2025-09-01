@@ -12,7 +12,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	mcpgrafana "github.com/grafana/mcp-grafana"
-	jwtutil "github.com/grafana/mcp-grafana/jwt"
 	"github.com/grafana/mcp-grafana/tools"
 )
 
@@ -50,11 +49,8 @@ type grafanaConfig struct {
 	tlsCAFile     string
 	tlsSkipVerify bool
 
-	// JWT configuration
-	jwtEnabled    bool
-	jwtRSAKeyFile string
-	jwtHeader     string
-	jwtPrefix     string
+	// JWT configuration file path
+	jwtConfigFile string
 }
 
 func (dt *disabledTools) addFlags() {
@@ -84,11 +80,8 @@ func (gc *grafanaConfig) addFlags() {
 	flag.StringVar(&gc.tlsCAFile, "tls-ca-file", "", "Path to TLS CA certificate file for server verification")
 	flag.BoolVar(&gc.tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (insecure)")
 
-	// JWT configuration flags
-	flag.BoolVar(&gc.jwtEnabled, "jwt-enabled", false, "Enable JWT token validation")
-	flag.StringVar(&gc.jwtRSAKeyFile, "jwt-rsa-key-file", "", "Path to RSA public key file for JWT validation (required when JWT is enabled)")
-	flag.StringVar(&gc.jwtHeader, "jwt-header", "Authorization", "HTTP header name to extract JWT from")
-	flag.StringVar(&gc.jwtPrefix, "jwt-prefix", "Bearer ", "Token prefix in the header (e.g., 'Bearer ')")
+	// Configuration file
+	flag.StringVar(&gc.jwtConfigFile, "config", "", "Path to configuration YAML file")
 }
 
 func (dt *disabledTools) addTools(s *server.MCPServer) {
@@ -128,7 +121,7 @@ func newServer(dt disabledTools) *server.MCPServer {
 	return s
 }
 
-func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt disabledTools, gc mcpgrafana.GrafanaConfig, jwtConfig jwtutil.Config) error {
+func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt disabledTools, gc mcpgrafana.GrafanaConfig, jwtConfigPath string) error {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 	s := newServer(dt)
 
@@ -140,7 +133,7 @@ func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt
 		return srv.Listen(context.Background(), os.Stdin, os.Stdout)
 	case "sse":
 		srv := server.NewSSEServer(s,
-			server.WithSSEContextFunc(mcpgrafana.ComposedSSEContextFuncWithJWT(gc, jwtConfig)),
+			server.WithSSEContextFunc(mcpgrafana.ComposedSSEContextFuncWithJWT(gc, jwtConfigPath)),
 			server.WithStaticBasePath(basePath),
 		)
 		slog.Info("Starting Grafana MCP server using SSE transport", "version", mcpgrafana.Version(), "address", addr, "basePath", basePath)
@@ -148,7 +141,7 @@ func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt
 			return fmt.Errorf("server error: %v", err)
 		}
 	case "streamable-http":
-		srv := server.NewStreamableHTTPServer(s, server.WithHTTPContextFunc(mcpgrafana.ComposedHTTPContextFuncWithJWT(gc, jwtConfig)),
+		srv := server.NewStreamableHTTPServer(s, server.WithHTTPContextFunc(mcpgrafana.ComposedHTTPContextFuncWithJWT(gc, jwtConfigPath)),
 			server.WithStateLess(true),
 			server.WithEndpointPath(endpointPath),
 		)
@@ -201,15 +194,7 @@ func main() {
 		}
 	}
 
-	// Create JWT config
-	jwtConfig := jwtutil.Config{
-		Enabled:     gc.jwtEnabled,
-		RSAKeyFile:  gc.jwtRSAKeyFile,
-		Header:      gc.jwtHeader,
-		TokenPrefix: gc.jwtPrefix,
-	}
-
-	if err := run(transport, *addr, *basePath, *endpointPath, parseLevel(*logLevel), dt, grafanaConfig, jwtConfig); err != nil {
+	if err := run(transport, *addr, *basePath, *endpointPath, parseLevel(*logLevel), dt, grafanaConfig, gc.jwtConfigFile); err != nil {
 		panic(err)
 	}
 }
