@@ -1,0 +1,104 @@
+# JWT Configuration for Grafana MCP Server
+# This file configures JWT authentication with RSA256 signature validation,
+# username authorization, and cluster validation.
+
+# Enable or disable JWT validation
+enabled: true
+
+# Expected cluster name - must match the "cluster" field in JWT payload
+cluster_name: "test-cluster-ci"
+
+# List of usernames allowed to access the MCP server
+# Must match the "username" field in JWT payload
+allowed_users:
+  - "jeromed-gre"
+  - "dauchyj"
+  - "toto"
+
+# Role-based tool permissions
+# Define which tools each user role can access
+# Use "*" to grant access to all tools
+role_permissions:
+  admin:
+    tools: ["*"]  # Admin has access to all tools
+
+  editor:
+    tools: [
+      # Dashboard management
+      "search_dashboards", "get_dashboard_by_uid", "get_dashboard_summary",
+      "get_dashboard_property", "get_dashboard_panel_queries", "update_dashboard",
+
+      # Data source access
+      "list_datasources", "get_datasource_by_uid", "get_datasource_by_name",
+
+      # Querying tools
+      "query_prometheus", "list_prometheus_metric_names", "list_prometheus_label_names",
+      "list_prometheus_label_values", "list_prometheus_metric_metadata",
+      "query_loki_logs", "query_loki_stats", "list_loki_label_names", "list_loki_label_values",
+
+      # Alerting (read-only)
+      "list_alert_rules", "get_alert_rule_by_uid", "list_contact_points",
+
+      # Navigation
+      "generate_deeplink"
+    ]
+
+  viewer:
+    tools: [
+      # Read-only dashboard access
+      "search_dashboards", "get_dashboard_by_uid", "get_dashboard_summary",
+      "get_dashboard_property", "get_dashboard_panel_queries",
+
+      # Data source viewing
+      "list_datasources", "get_datasource_by_uid", "get_datasource_by_name",
+
+      # Querying tools (read-only)
+      "query_prometheus", "list_prometheus_metric_names", "list_prometheus_label_names",
+      "list_prometheus_label_values", "list_prometheus_metric_metadata",
+      "query_loki_logs", "query_loki_stats", "list_loki_label_names", "list_loki_label_values",
+
+      # Navigation
+      "generate_deeplink"
+    ]
+
+  incident_responder:
+    tools: [
+      # Incident management
+      "list_incidents", "get_incident", "create_incident", "add_activity_to_incident",
+
+      # OnCall management
+      "list_oncall_schedules", "get_oncall_shift", "get_current_oncall_users",
+      "list_oncall_teams", "list_oncall_users",
+
+      # Sift investigations
+      "list_sift_investigations", "get_sift_investigation", "get_sift_analysis",
+      "find_error_pattern_logs", "find_slow_requests",
+
+      # Essential monitoring tools
+      "query_prometheus", "query_loki_logs", "list_alert_rules", "get_alert_rule_by_uid",
+
+      # Data source access for investigation
+      "list_datasources", "get_datasource_by_uid", "get_datasource_by_name",
+
+      # Navigation
+      "generate_deeplink"
+    ]
+
+
+# RSA public keys for JWT validation
+publicKey: |
+  -----BEGIN PUBLIC KEY-----
+  MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzDqnC8Zp7c9HE0Kg9x3m
+  jt31BHbleloVapfVZwba0cLyuKspVGil9IFr9eE2T3s3w+6vEdWx2cqvpXccszDi
+  Je0NJZmAWAHprBvtOSZvbZmsV2rw3bQw2xqmD/VrNWYX/xfO5pMI1r9sQuN1vZXB
+  oxku8P/FvnXvgb4DFPmkg7G5GuHuCmXK1pxfFNh7uet8vFht7StWphg8HsWRHp2Z
+  YlRgG+/LYG/RYp53krM5Q2wF5sHtGOvpQWFSJy0N4h7xFJufUbv1FLp0Edfzpe9Q
+  3SUhb2rU0lKeb2BLbsT9AGwTzbPSd5r/cuOPz7lrqLjovPug+q404CxXZeYpg57i
+  1QIDAQAB
+  -----END PUBLIC KEY-----
+
+# HTTP header containing the JWT token (optional, defaults to "Authorization")
+header: "Authorization"
+
+# Token prefix in the header (optional, defaults to "Bearer ")
+token_prefix: "Bearer "

@@ -29,3 +29,5 @@ wheels/
 *.ipr
 *.sublime-project
 *.sublime-workspace
+
+*.exe

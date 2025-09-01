@@ -53,31 +53,32 @@ func (c *Claims) GetSubject() (string, error) {
 	return c.Sub, nil
 }
 
-// RSAKey represents an RSA key configuration
-type RSAKey struct {
-	// Key ID for JWT kid validation
-	Kid string `yaml:"kid"`
-	// Inline RSA public key as PEM string
-	PublicKey string `yaml:"publicKey"`
+// RolePermissions represents the tools allowed for a specific user role
+type RolePermissions struct {
+	// List of tool names allowed for this role. Use "*" for all tools.
+	Tools []string `yaml:"tools"`
 }
 
 // YAMLConfig represents the JWT configuration loaded from YAML
 type YAMLConfig struct {
 	// Enable JWT validation
 	Enabled bool `yaml:"enabled"`
-
+	
 	// Expected cluster name
 	ClusterName string `yaml:"cluster_name"`
-
+	
 	// List of allowed usernames
 	AllowedUsers []string `yaml:"allowed_users"`
-
-	// RSA keys for JWT validation (supports multiple keys)
-	RSAKeys []RSAKey `yaml:"rsa_keys"`
-
+	
+	// Role-based tool permissions
+	RolePermissions map[string]RolePermissions `yaml:"role_permissions,omitempty"`
+	
+	// RSA public key for JWT validation (inline PEM format)
+	PublicKey string `yaml:"publicKey"`
+	
 	// HTTP header name to extract JWT from (defaults to "Authorization")
 	Header string `yaml:"header,omitempty"`
-
+	
 	// Bearer token prefix (defaults to "Bearer ")
 	TokenPrefix string `yaml:"token_prefix,omitempty"`
 }
@@ -114,20 +115,27 @@ func LoadYAMLConfig(configPath string) (*YAMLConfig, error) {
 		if len(config.AllowedUsers) == 0 {
 			return nil, fmt.Errorf("at least one allowed user is required when JWT is enabled")
 		}
-		if len(config.RSAKeys) == 0 {
-			return nil, fmt.Errorf("at least one RSA key is required when JWT is enabled")
-		}
-		for i, key := range config.RSAKeys {
-			if key.Kid == "" {
-				return nil, fmt.Errorf("RSA key %d: kid is required", i)
-			}
-			if key.PublicKey == "" {
-				return nil, fmt.Errorf("RSA key %d: publicKey is required", i)
-			}
+		if config.PublicKey == "" {
+			return nil, fmt.Errorf("publicKey is required when JWT is enabled")
 		}
 	}
 
 	return &config, nil
+}
+
+// GetAllowedToolsForRole returns the list of tools allowed for a specific user role
+func (yc *YAMLConfig) GetAllowedToolsForRole(role string) []string {
+	if yc.RolePermissions == nil {
+		// No role permissions configured, allow all tools
+		return []string{"*"}
+	}
+	
+	if permissions, exists := yc.RolePermissions[role]; exists {
+		return permissions.Tools
+	}
+	
+	// Role not found, return empty list (no tools allowed)
+	return []string{}
 }
 
 // ToConfig converts YAMLConfig to the original Config format for backward compatibility

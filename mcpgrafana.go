@@ -610,6 +610,7 @@ func ComposedHTTPContextFunc(config GrafanaConfig) server.HTTPContextFunc {
 type jwtKey struct{}
 type jwtClaimsKey struct{}
 type jwtErrorKey struct{}
+type allowedToolsKey struct{}
 
 // WithJWT adds a validated JWT token to the context.
 func WithJWT(ctx context.Context, token *gojwt.Token) context.Context {
@@ -653,6 +654,39 @@ func JWTErrorFromContext(ctx context.Context) error {
 	return nil
 }
 
+// WithAllowedTools adds the list of allowed tools for the current user to the context.
+func WithAllowedTools(ctx context.Context, tools []string) context.Context {
+	return context.WithValue(ctx, allowedToolsKey{}, tools)
+}
+
+// AllowedToolsFromContext retrieves the list of allowed tools from the context.
+// Returns nil if no allowed tools list has been set, indicating all tools are allowed.
+func AllowedToolsFromContext(ctx context.Context) []string {
+	if tools, ok := ctx.Value(allowedToolsKey{}).([]string); ok {
+		return tools
+	}
+	return nil
+}
+
+// IsToolAllowed checks if a specific tool is allowed for the current user.
+// Returns true if the tool is allowed, false otherwise.
+func IsToolAllowed(ctx context.Context, toolName string) bool {
+	allowedTools := AllowedToolsFromContext(ctx)
+	if allowedTools == nil {
+		// No restrictions, all tools allowed
+		return true
+	}
+	
+	// Check if "*" (all tools) is in the allowed list
+	for _, tool := range allowedTools {
+		if tool == "*" || tool == toolName {
+			return true
+		}
+	}
+	
+	return false
+}
+
 // ValidateJWTFromHeaders is a HTTPContextFunc that validates JWT tokens from HTTP request headers.
 // It extracts and validates the JWT token according to the provided JWT configuration path.
 var ValidateJWTFromHeaders = func(jwtConfigPath string) httpContextFunc {
@@ -683,6 +717,15 @@ var ValidateJWTFromHeaders = func(jwtConfigPath string) httpContextFunc {
 					"role", claims.UserRole)
 				ctx = WithJWT(ctx, token)
 				ctx = WithJWTClaims(ctx, claims)
+				
+				// Get and store allowed tools for the user's role
+				if config, configErr := jwtutil.LoadYAMLConfig(jwtConfigPath); configErr == nil {
+					allowedTools := config.GetAllowedToolsForRole(claims.UserRole)
+					ctx = WithAllowedTools(ctx, allowedTools)
+					slog.Debug("Applied role-based tool permissions",
+						"role", claims.UserRole,
+						"allowed_tools", allowedTools)
+				}
 			}
 		}
 

@@ -82,6 +82,11 @@ func ConvertTool[T any, R any](name, description string, toolHandler ToolHandler
 	}
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check if the tool is allowed for the current user's role
+		if !IsToolAllowed(ctx, name) {
+			return nil, fmt.Errorf("tool '%s' is not allowed for your user role", name)
+		}
+		
 		// Create OpenTelemetry span for tool execution (no-op when no exporter configured)
 		config := GrafanaConfigFromContext(ctx)
 		ctx, span := otel.Tracer("mcp-grafana").Start(ctx, fmt.Sprintf("mcp.tool.%s", name))
