@@ -35,6 +35,8 @@ func NewYAMLValidator(configPath string) (*YAMLValidator, error) {
 		return nil, fmt.Errorf("failed to parse RSA public key: %w", err)
 	}
 
+	slog.Info("Successfully parsed RSA public key from config file", "config_path", configPath)
+
 	return &YAMLValidator{
 		config:    config,
 		publicKey: publicKey,

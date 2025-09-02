@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -93,6 +94,8 @@ func LoadYAMLConfig(configPath string) (*YAMLConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read JWT config file %s: %w", configPath, err)
 	}
+
+	slog.Info("Successfully read JWT config file", "config_path", configPath)
 
 	var config YAMLConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {

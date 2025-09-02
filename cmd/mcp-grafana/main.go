@@ -82,6 +82,7 @@ func (gc *grafanaConfig) addFlags() {
 
 	// Configuration file
 	flag.StringVar(&gc.jwtConfigFile, "config", "", "Path to configuration YAML file")
+	flag.StringVar(&gc.jwtConfigFile, "c", "", "Path to configuration YAML file (short form)")
 }
 
 func (dt *disabledTools) addTools(s *server.MCPServer) {
