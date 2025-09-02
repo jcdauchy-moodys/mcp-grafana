@@ -232,9 +232,64 @@ func NewUserAgentTransport(rt http.RoundTripper, userAgent ...string) *UserAgent
 	}
 }
 
+// DebugTransport wraps an http.RoundTripper to log HTTP requests and responses at debug level.
+// This provides detailed visibility into all HTTP traffic when debug mode is enabled.
+type DebugTransport struct {
+	rt http.RoundTripper
+}
+
+func (t *DebugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Log the request
+	slog.Debug("HTTP Request",
+		"method", req.Method,
+		"url", req.URL.String(),
+		"headers", req.Header,
+	)
+
+	// Make the request
+	resp, err := t.rt.RoundTrip(req)
+	
+	if err != nil {
+		slog.Debug("HTTP Request failed",
+			"method", req.Method,
+			"url", req.URL.String(),
+			"error", err,
+		)
+		return nil, err
+	}
+
+	// Log the response
+	slog.Debug("HTTP Response",
+		"method", req.Method,
+		"url", req.URL.String(),
+		"status", resp.StatusCode,
+		"status_text", resp.Status,
+		"headers", resp.Header,
+	)
+
+	return resp, nil
+}
+
+// NewDebugTransport creates a new DebugTransport that logs HTTP requests and responses.
+// The transport wraps the provided RoundTripper, defaulting to http.DefaultTransport if nil.
+func NewDebugTransport(rt http.RoundTripper) *DebugTransport {
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
+	return &DebugTransport{rt: rt}
+}
+
 // wrapWithUserAgent wraps an http.RoundTripper with user agent tracking
 func wrapWithUserAgent(rt http.RoundTripper) http.RoundTripper {
 	return NewUserAgentTransport(rt)
+}
+
+// wrapWithDebug wraps an http.RoundTripper with debug logging when debug mode is enabled
+func wrapWithDebug(rt http.RoundTripper, debug bool) http.RoundTripper {
+	if debug {
+		return NewDebugTransport(rt)
+	}
+	return rt
 }
 
 // Gets info from environment
@@ -401,11 +456,16 @@ func NewGrafanaClient(ctx context.Context, grafanaURL, apiKey string, auth *url.
 			transportField := v.FieldByName("Transport")
 			if transportField.IsValid() && transportField.CanSet() {
 				if rt, ok := transportField.Interface().(http.RoundTripper); ok {
-					// Wrap with user agent first, then otel
-					userAgentWrapped := wrapWithUserAgent(rt)
+					// Wrap with debug logging first (if enabled), then user agent, then otel
+					debugWrapped := wrapWithDebug(rt, config.Debug)
+					userAgentWrapped := wrapWithUserAgent(debugWrapped)
 					wrapped := otelhttp.NewTransport(userAgentWrapped)
 					transportField.Set(reflect.ValueOf(wrapped))
-					slog.Debug("HTTP tracing and user agent tracking enabled for Grafana client")
+					if config.Debug {
+						slog.Debug("HTTP debug tracing, user agent tracking, and OpenTelemetry enabled for Grafana client")
+					} else {
+						slog.Debug("HTTP tracing and user agent tracking enabled for Grafana client")
+					}
 				}
 			}
 		}
