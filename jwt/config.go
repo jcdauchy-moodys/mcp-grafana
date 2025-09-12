@@ -95,7 +95,7 @@ func LoadYAMLConfig(configPath string) (*YAMLConfig, error) {
 		return nil, fmt.Errorf("failed to read JWT config file %s: %w", configPath, err)
 	}
 
-	slog.Info("Successfully read JWT config file", "config_path", configPath)
+	slog.Debug("Successfully read JWT config file", "config_path", configPath)
 
 	var config YAMLConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
