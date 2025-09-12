@@ -282,7 +282,7 @@ var ExtractGrafanaInfoFromEnv server.StdioContextFunc = func(ctx context.Context
 		panic(fmt.Errorf("invalid Grafana URL %s: %w", u, err))
 	}
 
-	slog.Debug("Grafana configuration details", "url", u, "api_key", apiKey)
+	slog.Info("Grafana configuration details", "url", u, "api_key", apiKey)
 	slog.Info("Using Grafana configuration", "url", parsedURL.Redacted(), "api_key_set", apiKey != "", "basic_auth_set", basicAuth != nil)
 
 	// Get existing config or create a new one.
