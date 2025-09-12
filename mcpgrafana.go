@@ -41,12 +41,24 @@ const (
 func urlAndAPIKeyFromEnv() (string, string) {
 	u := strings.TrimRight(os.Getenv(grafanaURLEnvVar), "/")
 	apiKey := os.Getenv(grafanaAPIEnvVar)
+
+	slog.Debug("Reading Grafana configuration from environment variables",
+		"GRAFANA_URL_env", u,
+		"GRAFANA_API_KEY_env", maskAPIKey(apiKey),
+		"GRAFANA_URL_set", u != "",
+		"GRAFANA_API_KEY_set", apiKey != "")
+
 	return u, apiKey
 }
 
 func userAndPassFromEnv() *url.Userinfo {
 	username := os.Getenv(grafanaUsernameEnvVar)
 	password, exists := os.LookupEnv(grafanaPasswordEnvVar)
+
+	slog.Debug("Reading Grafana auth from environment variables",
+		"GRAFANA_USERNAME_set", username != "",
+		"GRAFANA_PASSWORD_set", exists && password != "")
+
 	if username == "" && password == "" {
 		return nil
 	}
@@ -59,6 +71,13 @@ func userAndPassFromEnv() *url.Userinfo {
 func urlAndAPIKeyFromHeaders(req *http.Request) (string, string) {
 	u := strings.TrimRight(req.Header.Get(grafanaURLHeader), "/")
 	apiKey := req.Header.Get(grafanaAPIKeyHeader)
+
+	slog.Debug("Reading Grafana configuration from HTTP headers",
+		"X-Grafana-URL", u,
+		"X-Grafana-API-Key", maskAPIKey(apiKey),
+		"X-Grafana-URL_set", u != "",
+		"X-Grafana-API-Key_set", apiKey != "")
+
 	return u, apiKey
 }
 
@@ -254,6 +273,13 @@ func extractKeyGrafanaInfoFromReq(req *http.Request) (grafanaUrl, apiKey string,
 	username, password, _ := req.BasicAuth()
 
 	grafanaUrl, apiKey = urlAndAPIKeyFromHeaders(req)
+
+	slog.Debug("RGrafana configuration from environment variables",
+		"grafanaUrl", grafanaUrl,
+		"eUrl", eUrl,
+		"apiKey", apiKey,
+		"eApiKey", eApiKey)
+
 	// If anything is missing, check if we can get it from the environment
 	if grafanaUrl == "" {
 		grafanaUrl = eUrl
