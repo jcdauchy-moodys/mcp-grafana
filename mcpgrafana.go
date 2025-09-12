@@ -282,6 +282,7 @@ var ExtractGrafanaInfoFromEnv server.StdioContextFunc = func(ctx context.Context
 		panic(fmt.Errorf("invalid Grafana URL %s: %w", u, err))
 	}
 
+	slog.Debug("Grafana configuration details", "url", u, "api_key", apiKey)
 	slog.Info("Using Grafana configuration", "url", parsedURL.Redacted(), "api_key_set", apiKey != "", "basic_auth_set", basicAuth != nil)
 
 	// Get existing config or create a new one.
@@ -676,14 +677,14 @@ func IsToolAllowed(ctx context.Context, toolName string) bool {
 		// No restrictions, all tools allowed
 		return true
 	}
-	
+
 	// Check if "*" (all tools) is in the allowed list
 	for _, tool := range allowedTools {
 		if tool == "*" || tool == toolName {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -717,7 +718,7 @@ var ValidateJWTFromHeaders = func(jwtConfigPath string) httpContextFunc {
 					"role", claims.UserRole)
 				ctx = WithJWT(ctx, token)
 				ctx = WithJWTClaims(ctx, claims)
-				
+
 				// Get and store allowed tools for the user's role
 				if config, configErr := jwtutil.LoadYAMLConfig(jwtConfigPath); configErr == nil {
 					allowedTools := config.GetAllowedToolsForRole(claims.UserRole)
