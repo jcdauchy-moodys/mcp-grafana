@@ -273,6 +273,18 @@ func extractKeyGrafanaInfoFromReq(req *http.Request) (grafanaUrl, apiKey string,
 	return
 }
 
+// maskAPIKey masks the API key for safe logging by showing first 8 chars and last 4 chars
+func maskAPIKey(apiKey string) string {
+	if apiKey == "" {
+		return ""
+	}
+	if len(apiKey) <= 12 {
+		// For short keys, just show that it exists
+		return "***masked***"
+	}
+	return apiKey[:8] + "****" + apiKey[len(apiKey)-4:]
+}
+
 // ExtractGrafanaInfoFromEnv is a StdioContextFunc that extracts Grafana configuration from environment variables.
 // It reads GRAFANA_URL and GRAFANA_API_KEY environment variables and adds the configuration to the context for use by Grafana clients.
 var ExtractGrafanaInfoFromEnv server.StdioContextFunc = func(ctx context.Context) context.Context {
@@ -282,7 +294,7 @@ var ExtractGrafanaInfoFromEnv server.StdioContextFunc = func(ctx context.Context
 		panic(fmt.Errorf("invalid Grafana URL %s: %w", u, err))
 	}
 
-	slog.Info("Grafana configuration details", "url", u, "api_key", apiKey)
+	slog.Debug("Grafana configuration details from environment", "grafana_url", u, "api_key", maskAPIKey(apiKey))
 	slog.Info("Using Grafana configuration", "url", parsedURL.Redacted(), "api_key_set", apiKey != "", "basic_auth_set", basicAuth != nil)
 
 	// Get existing config or create a new one.
@@ -303,6 +315,8 @@ type httpContextFunc func(ctx context.Context, req *http.Request) context.Contex
 // It reads X-Grafana-URL and X-Grafana-API-Key headers, falling back to environment variables if headers are not present.
 var ExtractGrafanaInfoFromHeaders httpContextFunc = func(ctx context.Context, req *http.Request) context.Context {
 	u, apiKey, basicAuth := extractKeyGrafanaInfoFromReq(req)
+
+	slog.Debug("Grafana configuration details from headers/environment", "grafana_url", u, "api_key", maskAPIKey(apiKey))
 
 	// Get existing config or create a new one.
 	// This will respect the existing debug flag, if set.
