@@ -35,7 +35,7 @@ type disabledTools struct {
 	search, datasource, incident,
 	prometheus, loki, influxdb, alerting,
 	dashboard, oncall, asserts, sift, admin,
-	pyroscope, navigation bool
+	pyroscope, navigation, oracle bool
 }
 
 // Configuration for the Grafana client.
@@ -58,7 +58,7 @@ type grafanaConfig struct {
 }
 
 func (dt *disabledTools) addFlags() {
-	flag.StringVar(&dt.enabledTools, "enabled-tools", "search,datasource,incident,prometheus,loki,influxdb,alerting,dashboard,oncall,asserts,sift,admin,pyroscope,navigation", "A comma separated list of tools enabled for this server. Can be overwritten entirely or by disabling specific components, e.g. --disable-search.")
+	flag.StringVar(&dt.enabledTools, "enabled-tools", "search,datasource,incident,prometheus,loki,influxdb,alerting,dashboard,oncall,asserts,sift,admin,pyroscope,navigation,oracle", "A comma separated list of tools enabled for this server. Can be overwritten entirely or by disabling specific components, e.g. --disable-search.")
 
 	flag.BoolVar(&dt.search, "disable-search", false, "Disable search tools")
 	flag.BoolVar(&dt.datasource, "disable-datasource", false, "Disable datasource tools")
@@ -74,6 +74,7 @@ func (dt *disabledTools) addFlags() {
 	flag.BoolVar(&dt.admin, "disable-admin", false, "Disable admin tools")
 	flag.BoolVar(&dt.pyroscope, "disable-pyroscope", false, "Disable pyroscope tools")
 	flag.BoolVar(&dt.navigation, "disable-navigation", false, "Disable navigation tools")
+	flag.BoolVar(&dt.oracle, "disable-oracle", false, "Disable oracle database tools")
 }
 
 func (gc *grafanaConfig) addFlags() {
@@ -107,6 +108,7 @@ func (dt *disabledTools) addTools(s *server.MCPServer) {
 	maybeAddTools(s, tools.AddAdminTools, enabledTools, dt.admin, "admin")
 	maybeAddTools(s, tools.AddPyroscopeTools, enabledTools, dt.pyroscope, "pyroscope")
 	maybeAddTools(s, tools.AddNavigationTools, enabledTools, dt.navigation, "navigation")
+	maybeAddTools(s, tools.AddOracleTools, enabledTools, dt.oracle, "oracle")
 }
 
 func newServer(dt disabledTools) *server.MCPServer {
@@ -117,6 +119,7 @@ func newServer(dt disabledTools) *server.MCPServer {
 	- Dashboards: Search, retrieve, update, and create dashboards. Extract panel queries and datasource information.
 	- Datasources: List and fetch details for datasources.
 	- Prometheus & Loki: Run PromQL and LogQL queries, retrieve metric/log metadata, and explore label names/values.
+	- Oracle Database: List tables, describe table structures, execute SQL queries, and manage Oracle database schemas.
 	- Incidents: Search, create, update, and resolve incidents in Grafana Incident.
 	- Sift Investigations: Start and manage Sift investigations, analyze logs/traces, find error patterns, and detect slow requests.
 	- Alerting: List and fetch alert rules and notification contact points.
