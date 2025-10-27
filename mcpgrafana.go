@@ -709,6 +709,25 @@ func IsToolAllowed(ctx context.Context, toolName string) bool {
 	return false
 }
 
+// IsAdminUser checks if the current user has admin privileges.
+// Returns true if the user has admin role, false otherwise.
+func IsAdminUser(ctx context.Context) bool {
+	claims := JWTClaimsFromContext(ctx)
+	if claims == nil || claims.UserRole == "" {
+		return false
+	}
+
+	// Consider admin if role contains "admin" (case-insensitive)
+	adminRoles := []string{"admin", "administrator", "root", "super"}
+	userRole := strings.ToLower(claims.UserRole)
+	for _, role := range adminRoles {
+		if strings.ToLower(role) == userRole {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateJWTFromHeaders is a HTTPContextFunc that validates JWT tokens from HTTP request headers.
 // It extracts and validates the JWT token according to the provided JWT configuration path.
 var ValidateJWTFromHeaders = func(jwtConfigPath string) httpContextFunc {

@@ -1130,6 +1130,11 @@ type CreateInfluxDBRetentionPolicyParams struct {
 
 // createInfluxDBRetentionPolicy creates a new retention policy in InfluxDB 1.x
 func createInfluxDBRetentionPolicy(ctx context.Context, args CreateInfluxDBRetentionPolicyParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this configuration operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: creating InfluxDB retention policies requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1203,6 +1208,11 @@ type AlterInfluxDBRetentionPolicyParams struct {
 
 // alterInfluxDBRetentionPolicy modifies an existing retention policy in InfluxDB 1.x
 func alterInfluxDBRetentionPolicy(ctx context.Context, args AlterInfluxDBRetentionPolicyParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this configuration operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: altering InfluxDB retention policies requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1282,6 +1292,11 @@ type DropInfluxDBRetentionPolicyParams struct {
 
 // dropInfluxDBRetentionPolicy removes a retention policy from InfluxDB 1.x
 func dropInfluxDBRetentionPolicy(ctx context.Context, args DropInfluxDBRetentionPolicyParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this destructive operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: dropping InfluxDB retention policies requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1338,6 +1353,11 @@ type DropInfluxDBSeriesParams struct {
 
 // dropInfluxDBSeries removes series from InfluxDB 1.x
 func dropInfluxDBSeries(ctx context.Context, args DropInfluxDBSeriesParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this destructive operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: dropping InfluxDB series requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1401,6 +1421,11 @@ type DropInfluxDBMeasurementParams struct {
 
 // dropInfluxDBMeasurement removes an entire measurement from InfluxDB 1.x
 func dropInfluxDBMeasurement(ctx context.Context, args DropInfluxDBMeasurementParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this destructive operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: dropping InfluxDB measurements requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1457,6 +1482,11 @@ type DeleteInfluxDBDataParams struct {
 
 // deleteInfluxDBData removes specific data points from InfluxDB 1.x
 func deleteInfluxDBData(ctx context.Context, args DeleteInfluxDBDataParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this destructive operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: deleting InfluxDB data requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1679,6 +1709,11 @@ type CreateInfluxDBContinuousQueryParams struct {
 
 // createInfluxDBContinuousQuery creates a new continuous query in InfluxDB 1.x
 func createInfluxDBContinuousQuery(ctx context.Context, args CreateInfluxDBContinuousQueryParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this configuration operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: creating InfluxDB continuous queries requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
@@ -1735,6 +1770,11 @@ type DropInfluxDBContinuousQueryParams struct {
 
 // dropInfluxDBContinuousQuery removes a continuous query from InfluxDB 1.x
 func dropInfluxDBContinuousQuery(ctx context.Context, args DropInfluxDBContinuousQueryParams) (*InfluxDBResponse, error) {
+	// Check if user has admin privileges for this configuration operation
+	if !mcpgrafana.IsAdminUser(ctx) {
+		return nil, fmt.Errorf("access denied: dropping InfluxDB continuous queries requires admin privileges")
+	}
+
 	client, err := newInfluxDBClient(ctx, args.DatasourceUID)
 	if err != nil {
 		return nil, fmt.Errorf("creating InfluxDB client: %w", err)
