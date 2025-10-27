@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
+	"strings"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -51,6 +54,59 @@ func MustTool[T any, R any](
 // T is the request parameter type (must be a struct with jsonschema tags), and R is the response type which can be a string, struct, or *mcp.CallToolResult.
 type ToolHandlerFunc[T any, R any] = func(ctx context.Context, request T) (R, error)
 
+// logToolUsage logs the usage of a tool with user information for audit purposes
+func logToolUsage(ctx context.Context, toolName string) {
+	// Extract JWT claims from context
+	claims := JWTClaimsFromContext(ctx)
+
+	// Determine user information
+	username := "anonymous"
+	userRole := "unknown"
+	isAdmin := false
+	cluster := "unknown"
+
+	if claims != nil {
+		if claims.Username != "" {
+			username = claims.Username
+		}
+		if claims.UserRole != "" {
+			userRole = claims.UserRole
+		}
+		if claims.Cluster != "" {
+			cluster = claims.Cluster
+		}
+		// Consider admin if role contains "admin" (case-insensitive)
+		isAdmin = contains([]string{"admin", "administrator", "root", "super"}, userRole)
+	}
+
+	// Get allowed tools for additional context
+	allowedTools := AllowedToolsFromContext(ctx)
+	hasUnlimitedAccess := allowedTools == nil || contains(allowedTools, "*")
+
+	// Log structured information
+	slog.Info("Tool execution audit log",
+		"timestamp", time.Now().UTC().Format(time.RFC3339),
+		"username", username,
+		"user_role", userRole,
+		"is_admin", isAdmin,
+		"cluster", cluster,
+		"tool_name", toolName,
+		"has_unlimited_access", hasUnlimitedAccess,
+		"allowed_tools_count", len(allowedTools),
+	)
+}
+
+// contains checks if a slice contains a string (case-insensitive)
+func contains(slice []string, item string) bool {
+	item = strings.ToLower(item)
+	for _, s := range slice {
+		if strings.ToLower(s) == item {
+			return true
+		}
+	}
+	return false
+}
+
 // ConvertTool converts a toolHandler function to an MCP Tool and ToolHandlerFunc.
 // The toolHandler must accept a context.Context and a struct with jsonschema tags for parameter documentation.
 // The struct fields define the tool's input schema, while the return value can be a string, struct, or *mcp.CallToolResult.
@@ -84,9 +140,31 @@ func ConvertTool[T any, R any](name, description string, toolHandler ToolHandler
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Check if the tool is allowed for the current user's role
 		if !IsToolAllowed(ctx, name) {
+			// Log unauthorized access attempt
+			claims := JWTClaimsFromContext(ctx)
+			username := "anonymous"
+			userRole := "unknown"
+			if claims != nil {
+				if claims.Username != "" {
+					username = claims.Username
+				}
+				if claims.UserRole != "" {
+					userRole = claims.UserRole
+				}
+			}
+			slog.Warn("Unauthorized tool access attempt",
+				"timestamp", time.Now().UTC().Format(time.RFC3339),
+				"username", username,
+				"user_role", userRole,
+				"tool_name", name,
+				"status", "denied",
+			)
 			return nil, fmt.Errorf("tool '%s' is not allowed for your user role", name)
 		}
-		
+
+		// Log successful tool usage for audit purposes
+		logToolUsage(ctx, name)
+
 		// Create OpenTelemetry span for tool execution (no-op when no exporter configured)
 		config := GrafanaConfigFromContext(ctx)
 		ctx, span := otel.Tracer("mcp-grafana").Start(ctx, fmt.Sprintf("mcp.tool.%s", name))

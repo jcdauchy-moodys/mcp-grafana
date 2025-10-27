@@ -78,7 +78,13 @@ type TLSConfig struct {
 // It includes connection details, authentication credentials, debug settings, and TLS options used throughout the MCP server's lifecycle.
 type GrafanaConfig struct {
 	// Debug enables debug mode for the Grafana client.
+	// DEPRECATED: Use HTTPDebug instead for HTTP request/response logging
 	Debug bool
+
+	// HTTPDebug enables debug mode specifically for HTTP requests/responses in the Grafana client.
+	// When enabled, logs all HTTP requests and responses with full headers and body.
+	// This should be used sparingly as it generates very verbose logs.
+	HTTPDebug bool
 
 	// IncludeArgumentsInSpans enables logging of tool arguments in OpenTelemetry spans.
 	// This should only be enabled in non-production environments or when you're certain
@@ -389,7 +395,8 @@ func NewGrafanaClient(ctx context.Context, grafanaURL, apiKey string, auth *url.
 	}
 
 	config := GrafanaConfigFromContext(ctx)
-	cfg.Debug = config.Debug
+	// Use HTTPDebug for HTTP request/response logging, falling back to Debug for backward compatibility
+	cfg.Debug = config.HTTPDebug || config.Debug
 
 	// Configure TLS if custom TLS configuration is provided
 	if tlsConfig := config.TLSConfig; tlsConfig != nil {
@@ -699,6 +706,25 @@ func IsToolAllowed(ctx context.Context, toolName string) bool {
 		}
 	}
 
+	return false
+}
+
+// IsAdminUser checks if the current user has admin privileges.
+// Returns true if the user has admin role, false otherwise.
+func IsAdminUser(ctx context.Context) bool {
+	claims := JWTClaimsFromContext(ctx)
+	if claims == nil || claims.UserRole == "" {
+		return false
+	}
+
+	// Consider admin if role contains "admin" (case-insensitive)
+	adminRoles := []string{"admin", "administrator", "root", "super"}
+	userRole := strings.ToLower(claims.UserRole)
+	for _, role := range adminRoles {
+		if strings.ToLower(role) == userRole {
+			return true
+		}
+	}
 	return false
 }
 
