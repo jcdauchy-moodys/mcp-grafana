@@ -43,6 +43,10 @@ type grafanaConfig struct {
 	// Whether to enable debug mode for the Grafana transport.
 	debug bool
 
+	// Whether to enable HTTP debug logging for all HTTP requests/responses.
+	// This generates very verbose logs and should be used sparingly.
+	httpDebug bool
+
 	// TLS configuration
 	tlsCertFile   string
 	tlsKeyFile    string
@@ -74,6 +78,7 @@ func (dt *disabledTools) addFlags() {
 
 func (gc *grafanaConfig) addFlags() {
 	flag.BoolVar(&gc.debug, "debug", false, "Enable debug mode for the Grafana transport")
+	flag.BoolVar(&gc.httpDebug, "http-debug", false, "Enable HTTP debug logging (logs all HTTP requests/responses with full headers - very verbose)")
 
 	// TLS configuration flags
 	flag.StringVar(&gc.tlsCertFile, "tls-cert-file", "", "Path to TLS certificate file for client authentication")
@@ -187,7 +192,10 @@ func main() {
 	}
 
 	// Convert local grafanaConfig to mcpgrafana.GrafanaConfig
-	grafanaConfig := mcpgrafana.GrafanaConfig{Debug: gc.debug}
+	grafanaConfig := mcpgrafana.GrafanaConfig{
+		Debug:     gc.debug,
+		HTTPDebug: gc.httpDebug,
+	}
 	if gc.tlsCertFile != "" || gc.tlsKeyFile != "" || gc.tlsCAFile != "" || gc.tlsSkipVerify {
 		grafanaConfig.TLSConfig = &mcpgrafana.TLSConfig{
 			CertFile:   gc.tlsCertFile,
