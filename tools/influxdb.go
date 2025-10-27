@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	mcpgrafana "github.com/grafana/mcp-grafana"
@@ -269,6 +270,98 @@ var QueryInfluxQL = mcpgrafana.MustTool(
 	mcp.WithReadOnlyHintAnnotation(true),
 )
 
+// enhanceFluxQueryWithRetentionPolicy automatically adds default retention policies
+// to bucket names in Flux queries that don't already specify one
+func enhanceFluxQueryWithRetentionPolicy(ctx context.Context, client *InfluxDBClient, query string, datasourceUID string) (string, error) {
+	// Regex to find bucket references: from(bucket: "database_name")
+	bucketRegex := regexp.MustCompile(`from\s*\(\s*bucket\s*:\s*"([^"]+)"\s*\)`)
+	matches := bucketRegex.FindAllStringSubmatch(query, -1)
+
+	if len(matches) == 0 {
+		return query, nil // No bucket references found
+	}
+
+	processedQuery := query
+	processedBuckets := make(map[string]string) // Cache to avoid duplicate API calls
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+
+		bucketName := match[1]
+
+		// Skip if already has retention policy (contains "/")
+		if strings.Contains(bucketName, "/") {
+			continue
+		}
+
+		// Check cache first
+		if enhancedBucket, exists := processedBuckets[bucketName]; exists {
+			processedQuery = strings.ReplaceAll(processedQuery,
+				fmt.Sprintf(`bucket: "%s"`, bucketName),
+				fmt.Sprintf(`bucket: "%s"`, enhancedBucket))
+			continue
+		}
+
+		// Get default retention policy for this database
+		defaultRP, err := getDefaultRetentionPolicyForDatabase(ctx, client, bucketName)
+		if err != nil {
+			continue // Skip this bucket if we can't get the RP
+		}
+
+		// Create enhanced bucket name
+		enhancedBucket := fmt.Sprintf("%s/%s", bucketName, defaultRP)
+		processedBuckets[bucketName] = enhancedBucket
+
+		// Replace in query
+		processedQuery = strings.ReplaceAll(processedQuery,
+			fmt.Sprintf(`bucket: "%s"`, bucketName),
+			fmt.Sprintf(`bucket: "%s"`, enhancedBucket))
+	}
+
+	return processedQuery, nil
+}
+
+// getDefaultRetentionPolicyForDatabase gets the default retention policy for a database
+func getDefaultRetentionPolicyForDatabase(ctx context.Context, client *InfluxDBClient, database string) (string, error) {
+	params := url.Values{}
+	params.Add("q", fmt.Sprintf("SHOW RETENTION POLICIES ON %s", database))
+	params.Add("db", database)
+
+	respBytes, err := client.makeRequest(ctx, "GET", "/query", params, nil)
+	if err != nil {
+		return "", fmt.Errorf("querying retention policies: %w", err)
+	}
+
+	var response InfluxDBResponse
+	if err := json.Unmarshal(respBytes, &response); err != nil {
+		return "", fmt.Errorf("parsing retention policies: %w", err)
+	}
+
+	// Find the default retention policy
+	for _, result := range response.Results {
+		if result.Error != "" {
+			continue
+		}
+		for _, series := range result.Series {
+			for _, values := range series.Values {
+				if len(values) >= 7 {
+					// Format: [name, duration, shardGroupDuration, replicaN, futureWriteLimit, pastWriteLimit, default]
+					if isDefault, ok := values[6].(bool); ok && isDefault {
+						if name, ok := values[0].(string); ok {
+							return name, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to "autogen" - the most common default
+	return "autogen", nil
+}
+
 // QueryFluxParams defines the parameters for executing Flux queries
 type QueryFluxParams struct {
 	DatasourceUID string `json:"datasourceUid" jsonschema:"required,description=The UID of the InfluxDB datasource to query"`
@@ -288,117 +381,50 @@ func queryFlux(ctx context.Context, args QueryFluxParams) (interface{}, error) {
 		timeout = DefaultInfluxDBQueryTimeout
 	}
 
-	// Try multiple approaches for Flux queries as InfluxDB 1.x support varies
-
-	// Approach 1: Try the standard /query endpoint with Flux dialect
-	params := url.Values{}
-	params.Add("q", args.Query)
-	params.Add("dialect", "flux")
-	if timeout != "" {
-		params.Add("timeout", timeout)
+	// Process query to add default retention policies if missing
+	processedQuery, err := enhanceFluxQueryWithRetentionPolicy(ctx, client, args.Query, args.DatasourceUID)
+	if err != nil {
+		// Log warning but continue with original query as fallback
+		processedQuery = args.Query
 	}
 
-	respBytes, err := client.makeRequest(ctx, "POST", "/query", params, nil)
-	if err == nil {
-		// Try to parse as InfluxDB response first (JSON format)
-		var response InfluxDBResponse
-		if jsonErr := json.Unmarshal(respBytes, &response); jsonErr == nil && response.Error == "" {
-			// Check if we got a valid response
-			hasResults := false
-			for _, result := range response.Results {
-				if result.Error == "" && len(result.Series) > 0 {
-					hasResults = true
-					break
-				}
-			}
-			if hasResults {
-				return &response, nil
-			}
-		}
-
-		// If JSON parsing failed, try CSV parsing for Flux format
-		if strings.Contains(string(respBytes), "#datatype") || strings.Contains(string(respBytes), "_time") {
-			tables, csvErr := parseFluxCSV(string(respBytes))
-			if csvErr == nil && len(tables) > 0 {
-				return tables, nil
-			}
-		}
-
-		// Return raw response if we can't parse it properly
-		return map[string]interface{}{
-			"raw_response": string(respBytes),
-			"format":       "unknown",
-		}, nil
-	}
-
-	// Approach 2: Try /api/v2/query endpoint (for mixed InfluxDB 2.x/1.x setups)
+	// Use /api/v2/query endpoint for Flux queries
 	requestBody := map[string]interface{}{
-		"query": args.Query,
+		"query": processedQuery,
 	}
 	if timeout != "" {
 		requestBody["timeout"] = timeout
 	}
 
-	bodyBytes, err2 := json.Marshal(requestBody)
-	if err2 != nil {
-		return nil, fmt.Errorf("marshalling Flux query request: %w", err2)
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling Flux query request: %w", err)
 	}
 
-	respBytes, err2 = client.makeRequest(ctx, "POST", "/api/v2/query", nil, bodyBytes)
-	if err2 == nil {
-		// Parse CSV format response (which is the default for InfluxDB 2.x Flux)
-		if strings.Contains(string(respBytes), "#datatype") || strings.Contains(string(respBytes), "_time") {
-			tables, csvErr := parseFluxCSV(string(respBytes))
-			if csvErr == nil {
-				return tables, nil
-			}
+	respBytes, err := client.makeRequest(ctx, "POST", "/api/v2/query", nil, bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("flux query failed: %w", err)
+	}
+
+	// Parse CSV format response (which is the default for InfluxDB 2.x Flux)
+	if strings.Contains(string(respBytes), "#datatype") || strings.Contains(string(respBytes), "_time") {
+		tables, csvErr := parseFluxCSV(string(respBytes))
+		if csvErr == nil {
+			return tables, nil
 		}
-
-		// Try JSON parsing
-		var jsonResponse interface{}
-		if jsonErr := json.Unmarshal(respBytes, &jsonResponse); jsonErr == nil {
-			return jsonResponse, nil
-		}
-
-		// Return raw response
-		return map[string]interface{}{
-			"raw_response": string(respBytes),
-			"format":       "unknown",
-		}, nil
 	}
 
-	// Approach 3: Try /flux endpoint (some InfluxDB 1.x installations)
-	fluxBody := map[string]string{
-		"query": args.Query,
-	}
-	if timeout != "" {
-		fluxBody["timeout"] = timeout
+	// Try JSON parsing
+	var jsonResponse interface{}
+	if jsonErr := json.Unmarshal(respBytes, &jsonResponse); jsonErr == nil {
+		return jsonResponse, nil
 	}
 
-	fluxBytes, err3 := json.Marshal(fluxBody)
-	if err3 != nil {
-		return nil, fmt.Errorf("marshalling Flux query for /flux endpoint: %w", err3)
-	}
-
-	respBytes, err3 = client.makeRequest(ctx, "POST", "/flux", nil, fluxBytes)
-	if err3 == nil {
-		// Parse response
-		if strings.Contains(string(respBytes), "#datatype") || strings.Contains(string(respBytes), "_time") {
-			tables, csvErr := parseFluxCSV(string(respBytes))
-			if csvErr == nil {
-				return tables, nil
-			}
-		}
-
-		// Return raw response
-		return map[string]interface{}{
-			"raw_response": string(respBytes),
-			"format":       "flux_csv",
-		}, nil
-	}
-
-	// All approaches failed, return the most informative error
-	return nil, fmt.Errorf("flux query failed on all endpoints. Errors: /query: %v, /api/v2/query: %v, /flux: %v. This InfluxDB instance may not support Flux queries, or Flux may not be enabled", err, err2, err3)
+	// Return raw response if we can't parse it
+	return map[string]interface{}{
+		"raw_response": string(respBytes),
+		"format":       "unknown",
+	}, nil
 }
 
 // parseFluxCSV parses Flux CSV response into structured data
@@ -521,7 +547,7 @@ func parseFluxCSV(csvData string) ([]FluxTable, error) {
 // QueryFlux is a tool for executing Flux queries against InfluxDB
 var QueryFlux = mcpgrafana.MustTool(
 	"query_influxdb_flux",
-	"Execute a Flux query against an InfluxDB datasource. Flux is the functional query language that enables complex data transformations, joins, and analysis. This tool tries multiple API endpoints to maximize compatibility with different InfluxDB configurations (1.x with Flux, 2.x, mixed setups). Returns structured data in various formats depending on the server response.",
+	"Execute a Flux query against an InfluxDB datasource using the /api/v2/query endpoint. Flux is the functional query language that enables complex data transformations, joins, and analysis. Automatically adds default retention policies to bucket names if not specified (e.g., 'aws_db' becomes 'aws_db/autogen'). Returns structured data parsed from CSV or JSON responses.",
 	queryFlux,
 	mcp.WithTitleAnnotation("Query InfluxDB with Flux"),
 	mcp.WithIdempotentHintAnnotation(true),
@@ -547,85 +573,40 @@ func testInfluxDBFluxSupport(ctx context.Context, args TestInfluxDBFluxSupportPa
 		"recommendations":   []string{},
 	}
 
-	// Test simple Flux query on different endpoints
+	// Test simple Flux query on /api/v2/query endpoint
 	testQuery := `from(bucket: "test") |> range(start: -1m) |> limit(n: 1)`
+	endpointName := "/api/v2/query (POST)"
 
-	endpoints := []struct {
-		name     string
-		method   string
-		path     string
-		bodyFunc func() ([]byte, url.Values)
-	}{
-		{
-			name:   "/query with dialect=flux (GET)",
-			method: "GET",
-			path:   "/query",
-			bodyFunc: func() ([]byte, url.Values) {
-				params := url.Values{}
-				params.Add("q", testQuery)
-				params.Add("dialect", "flux")
-				return nil, params
-			},
-		},
-		{
-			name:   "/query with dialect=flux (POST)",
-			method: "POST",
-			path:   "/query",
-			bodyFunc: func() ([]byte, url.Values) {
-				params := url.Values{}
-				params.Add("q", testQuery)
-				params.Add("dialect", "flux")
-				return nil, params
-			},
-		},
-		{
-			name:   "/api/v2/query (POST)",
-			method: "POST",
-			path:   "/api/v2/query",
-			bodyFunc: func() ([]byte, url.Values) {
-				body := map[string]string{"query": testQuery}
-				bodyBytes, _ := json.Marshal(body)
-				return bodyBytes, nil
-			},
-		},
-		{
-			name:   "/flux (POST)",
-			method: "POST",
-			path:   "/flux",
-			bodyFunc: func() ([]byte, url.Values) {
-				body := map[string]string{"query": testQuery}
-				bodyBytes, _ := json.Marshal(body)
-				return bodyBytes, nil
-			},
-		},
-	}
+	results["endpoints_tested"] = []string{endpointName}
 
-	for _, endpoint := range endpoints {
-		results["endpoints_tested"] = append(results["endpoints_tested"].([]string), endpoint.name)
-
-		bodyBytes, params := endpoint.bodyFunc()
-		respBytes, err := client.makeRequest(ctx, endpoint.method, endpoint.path, params, bodyBytes)
+	// Prepare request body
+	body := map[string]string{"query": testQuery}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		results["error_details"].(map[string]string)[endpointName] = fmt.Sprintf("Failed to marshal request: %v", err)
+	} else {
+		respBytes, err := client.makeRequest(ctx, "POST", "/api/v2/query", nil, bodyBytes)
 
 		if err != nil {
-			results["error_details"].(map[string]string)[endpoint.name] = err.Error()
+			results["error_details"].(map[string]string)[endpointName] = err.Error()
 		} else {
-			results["working_endpoints"] = append(results["working_endpoints"].([]string), endpoint.name)
+			results["working_endpoints"] = append(results["working_endpoints"].([]string), endpointName)
 
 			// Analyze the response format
 			respStr := string(respBytes)
 			if strings.Contains(respStr, "#datatype") {
-				results[endpoint.name+"_format"] = "flux_csv"
+				results[endpointName+"_format"] = "flux_csv"
 			} else if strings.HasPrefix(strings.TrimSpace(respStr), "{") {
-				results[endpoint.name+"_format"] = "json"
+				results[endpointName+"_format"] = "json"
 			} else {
-				results[endpoint.name+"_format"] = "unknown"
+				results[endpointName+"_format"] = "unknown"
 			}
 
 			// Store a sample of the response (first 200 chars)
 			if len(respStr) > 200 {
-				results[endpoint.name+"_sample"] = respStr[:200] + "..."
+				results[endpointName+"_sample"] = respStr[:200] + "..."
 			} else {
-				results[endpoint.name+"_sample"] = respStr
+				results[endpointName+"_sample"] = respStr
 			}
 		}
 	}
@@ -635,12 +616,13 @@ func testInfluxDBFluxSupport(ctx context.Context, args TestInfluxDBFluxSupportPa
 	workingEndpoints := results["working_endpoints"].([]string)
 
 	if len(workingEndpoints) == 0 {
-		recommendations = append(recommendations, "No Flux endpoints are working. This InfluxDB instance may not support Flux queries.")
+		recommendations = append(recommendations, "The /api/v2/query endpoint is not working. This InfluxDB instance may not support Flux queries.")
 		recommendations = append(recommendations, "Check if Flux is enabled in your InfluxDB configuration.")
 		recommendations = append(recommendations, "Verify that your InfluxDB version supports Flux (1.8+ or 2.x).")
+		recommendations = append(recommendations, "Ensure the /api/v2/query endpoint is available and accessible.")
 	} else {
-		recommendations = append(recommendations, fmt.Sprintf("Working endpoints found: %v", workingEndpoints))
-		recommendations = append(recommendations, "Use the working endpoints for your Flux queries.")
+		recommendations = append(recommendations, "The /api/v2/query endpoint is working correctly for Flux queries.")
+		recommendations = append(recommendations, "Flux queries will use the /api/v2/query endpoint.")
 	}
 
 	results["recommendations"] = recommendations
@@ -651,7 +633,7 @@ func testInfluxDBFluxSupport(ctx context.Context, args TestInfluxDBFluxSupportPa
 // TestInfluxDBFluxSupport is a tool for testing Flux query support
 var TestInfluxDBFluxSupport = mcpgrafana.MustTool(
 	"test_influxdb_flux_support",
-	"Test which Flux query endpoints are available and working in an InfluxDB instance. This diagnostic tool helps troubleshoot Flux query issues by testing different API endpoints and providing recommendations. Useful when Flux queries are not working as expected.",
+	"Test if the /api/v2/query endpoint is available and working for Flux queries in an InfluxDB instance. This diagnostic tool helps troubleshoot Flux query issues by testing the standard Flux endpoint and providing recommendations. Useful when Flux queries are not working as expected.",
 	testInfluxDBFluxSupport,
 	mcp.WithTitleAnnotation("Test InfluxDB Flux Support"),
 	mcp.WithIdempotentHintAnnotation(true),
